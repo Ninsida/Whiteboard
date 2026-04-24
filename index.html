@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="theme-color" content="#1a1a1a" />
+<title>Whiteboard</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%231a1a1a'/><path d='M20 70 L45 45 L55 55 L80 30' stroke='%23fff' stroke-width='8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <div id="tabs" role="tablist"></div>
+    <button id="newTabBtn" class="icon-btn" title="Neuer Tab">＋</button>
+    <div class="spacer"></div>
+    <div class="group">
+      <button id="undoBtn" class="icon-btn" title="Rückgängig (Ctrl+Z)">↶</button>
+      <button id="redoBtn" class="icon-btn" title="Wiederholen (Ctrl+Y)">↷</button>
+    </div>
+    <div class="group">
+      <button id="zoomOutBtn" class="icon-btn" title="Herauszoomen">−</button>
+      <button id="zoomResetBtn" class="icon-btn" title="Zoom zurücksetzen">100%</button>
+      <button id="zoomInBtn" class="icon-btn" title="Hineinzoomen">+</button>
+    </div>
+    <div class="group">
+      <button id="exportPngBtn" class="icon-btn" title="Als PNG exportieren">PNG</button>
+      <button id="exportJsonBtn" class="icon-btn" title="Als JSON exportieren">JSON</button>
+      <button id="importJsonBtn" class="icon-btn" title="JSON importieren">⇪</button>
+      <input id="importFile" type="file" accept="application/json" hidden />
+    </div>
+    <button id="menuBtn" class="icon-btn" title="Menü">⋯</button>
+  </header>
+
+  <aside id="toolbar">
+    <button class="tool" data-tool="pen" title="Stift (P)">
+      <svg viewBox="0 0 24 24"><path d="M3 21l3.5-1 11-11-2.5-2.5-11 11L3 21z M14 7l3 3"/></svg>
+    </button>
+    <button class="tool" data-tool="marker" title="Marker (M)">
+      <svg viewBox="0 0 24 24"><path d="M4 19h16 M6 16l4-10h4l4 10" stroke-width="2.5"/></svg>
+    </button>
+    <button class="tool" data-tool="eraser" title="Radierer (E)">
+      <svg viewBox="0 0 24 24"><path d="M4 20h16 M7 16l9-9 4 4-9 9H7z"/></svg>
+    </button>
+    <button class="tool" data-tool="text" title="Text / Kommentar (T)">
+      <svg viewBox="0 0 24 24"><path d="M6 6h12 M12 6v14 M9 20h6"/></svg>
+    </button>
+    <button class="tool" data-tool="select" title="Auswählen/Verschieben (V)">
+      <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6-6-16z"/></svg>
+    </button>
+    <button class="tool" data-tool="hand" title="Verschieben (H / Leertaste)">
+      <svg viewBox="0 0 24 24"><path d="M8 11V5a1.5 1.5 0 013 0v6 M11 11V4a1.5 1.5 0 013 0v7 M14 11V5a1.5 1.5 0 013 0v9c0 4-3 7-7 7s-7-3-7-7v-3a1.5 1.5 0 013 0v2"/></svg>
+    </button>
+    <div class="sep"></div>
+    <label class="color-wrap" title="Farbe">
+      <input id="colorPicker" type="color" value="#1a1a1a" />
+    </label>
+    <div class="swatches" id="swatches"></div>
+    <div class="sep"></div>
+    <div class="size-wrap">
+      <input id="sizeSlider" type="range" min="1" max="60" value="3" title="Strichdicke" />
+      <div id="sizePreview" class="size-preview"></div>
+    </div>
+    <div class="sep"></div>
+    <button class="tool" id="imgBtn" title="Bild / Datei einfügen">
+      <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/></svg>
+    </button>
+    <input id="imgInput" type="file" accept="image/*,application/pdf" multiple hidden />
+  </aside>
+
+  <main id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="overlay"></div>
+    <div id="selection"></div>
+    <div id="hint" class="hint">Leinwand leer — schreib drauf los, zieh Bilder rein oder drück <b>T</b> für Text.</div>
+  </main>
+
+  <div id="menu" class="menu hidden">
+    <button data-act="rename">Tab umbenennen</button>
+    <button data-act="duplicate">Tab duplizieren</button>
+    <button data-act="clear">Tab leeren</button>
+    <button data-act="delete" class="danger">Tab löschen</button>
+    <hr />
+    <button data-act="bg-white">Hintergrund: Weiß</button>
+    <button data-act="bg-grid">Hintergrund: Raster</button>
+    <button data-act="bg-dots">Hintergrund: Punkte</button>
+    <button data-act="bg-lines">Hintergrund: Linien</button>
+    <hr />
+    <button data-act="about">Info</button>
+  </div>
+
+  <div id="textEditor" class="text-editor hidden">
+    <textarea placeholder="Text eingeben..."></textarea>
+    <div class="row">
+      <input type="color" id="textColor" value="#1a1a1a" />
+      <input type="range" id="textSize" min="10" max="96" value="20" />
+      <label class="comment-toggle"><input type="checkbox" id="textIsComment" /> Kommentar</label>
+      <button id="textCancel">Abbrechen</button>
+      <button id="textSave" class="primary">OK</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
