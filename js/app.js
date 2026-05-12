@@ -1,8 +1,8 @@
 // App controller: tabs, toolbar, theme, sync, text editor, drag-drop.
 
-import { Board, createBoardModel } from "./board.js";
-import * as db from "./storage.js";
-import * as sync from "./sync.js";
+import { Board, createBoardModel } from "./board.js?v=21";
+import * as db from "./storage.js?v=21";
+import * as sync from "./sync.js?v=21";
 
 const SWATCH_COLORS = [
   "#0f172a", "#ffffff",
@@ -11,6 +11,8 @@ const SWATCH_COLORS = [
   "#0284c7", "#2563eb",
   "#7c3aed", "#db2777",
 ];
+
+const BUILD = "v2.1-idle-save";
 
 const $ = (s) => document.querySelector(s);
 
@@ -29,6 +31,7 @@ boot().catch(err => {
 });
 
 async function boot() {
+  console.log("%cWhiteboard " + BUILD, "background:#2563eb;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold");
   applyStoredTheme();
 
   state.board = new Board({
@@ -187,7 +190,23 @@ function onBoardChange() {
 }
 function queueSave() {
   if (state.saveTimer) clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(flushSave, 800);
+  state.saveTimer = setTimeout(triggerSave, 1500);
+}
+function triggerSave() {
+  state.saveTimer = null;
+  // Don't fight pointer events — if the user is mid-stroke, postpone.
+  if (state.board.currentStroke) { queueSave(); return; }
+  // Wait for an idle moment so the structured-clone work doesn't grab CPU
+  // right when the next pen-down arrives.
+  const run = () => {
+    if (state.board.currentStroke) { queueSave(); return; }
+    flushSave();
+  };
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(run, { timeout: 2000 });
+  } else {
+    setTimeout(run, 0);
+  }
 }
 async function flushSave() {
   if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
@@ -318,7 +337,7 @@ function wireMenu() {
       case "import-json": $("#importFile").click(); break;
       case "palm": cyclePalmMode(); break;
       case "about":
-        alert("Whiteboard — läuft komplett im Browser. Daten lokal in IndexedDB + optional via Firebase synchronisiert.\n\nTastenkürzel:\nP Stift · M Marker · E Radierer · T Text · V Auswahl · H Verschieben\nCtrl+Z / Ctrl+Shift+Z Undo/Redo · Ctrl+S Speichern · Ctrl+T neuer Tab · Leertaste = Verschieben");
+        alert(`Whiteboard ${BUILD}\n\nLäuft komplett im Browser. Daten lokal in IndexedDB + optional via Firebase synchronisiert.\n\nTastenkürzel:\nP Stift · M Marker · E Radierer · T Text · V Auswahl · H Verschieben\nCtrl+Z / Ctrl+Shift+Z Undo/Redo · Ctrl+S Speichern · Ctrl+T neuer Tab · Leertaste = Verschieben`);
         break;
     }
   });
