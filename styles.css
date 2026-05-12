@@ -111,6 +111,15 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   display: grid; place-items: center;
   color: #fff; font-weight: 700; font-size: 14px;
 }
+.version-pill {
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  letter-spacing: .03em;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
 
 #tabs { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
 .tab {
@@ -251,14 +260,15 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 
 /* color picker */
 .color-wrap {
-  width: 40px; height: 40px;
+  width: 42px; height: 42px;
   border-radius: 50%;
   position: relative;
   overflow: hidden;
   cursor: pointer;
-  border: 2px solid var(--border-strong);
+  border: 3px solid var(--border-strong);
   background: var(--canvas-bg);
   display: grid; place-items: center;
+  box-shadow: var(--shadow-sm);
 }
 .color-wrap input[type=color] {
   position: absolute; inset: -6px;
@@ -269,13 +279,13 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 .swatches {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 5px;
+  gap: 6px;
   padding: 0 4px;
 }
 .swatch {
-  width: 22px; height: 22px;
+  width: 24px; height: 24px;
   border-radius: 50%;
-  border: 2px solid transparent;
+  border: 2px solid var(--border);
   cursor: pointer;
   position: relative;
   transition: transform var(--transition);
@@ -283,23 +293,56 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 .swatch:hover { transform: scale(1.12); }
 .swatch.active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+  transform: scale(1.08);
 }
 
-/* size slider */
+/* size slider — horizontal so it works on iPad */
 .size-wrap {
   display: flex; flex-direction: column; align-items: center;
   gap: 8px; padding: 6px 0; width: 100%;
 }
 #sizeSlider {
-  -webkit-appearance: slider-vertical;
-  writing-mode: vertical-lr; direction: rtl;
-  width: 6px; height: 100px;
-  background: var(--border);
-  border-radius: 3px; cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 48px;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+#sizeSlider::-webkit-slider-runnable-track {
+  height: 6px;
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+#sizeSlider::-moz-range-track {
+  height: 6px;
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+#sizeSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  margin-top: -7px;
+}
+#sizeSlider::-moz-range-thumb {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
 .size-preview {
-  width: 38px; height: 38px;
+  width: 40px; height: 40px;
   border-radius: 50%;
   background: var(--panel-2);
   display: grid; place-items: center;

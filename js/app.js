@@ -1,8 +1,8 @@
 // App controller: tabs, toolbar, theme, sync, text editor, drag-drop.
 
-import { Board, createBoardModel } from "./board.js?v=21";
-import * as db from "./storage.js?v=21";
-import * as sync from "./sync.js?v=21";
+import { Board, createBoardModel } from "./board.js?v=22";
+import * as db from "./storage.js?v=22";
+import * as sync from "./sync.js?v=22";
 
 const SWATCH_COLORS = [
   "#0f172a", "#ffffff",
@@ -12,7 +12,17 @@ const SWATCH_COLORS = [
   "#7c3aed", "#db2777",
 ];
 
-const BUILD = "v2.1-idle-save";
+const BUILD = "v2.2";
+
+const DEFAULT_INK_LIGHT = "#0f172a";
+const DEFAULT_INK_DARK = "#f1f5f9";
+function defaultInk() {
+  return document.documentElement.dataset.theme === "dark" ? DEFAULT_INK_DARK : DEFAULT_INK_LIGHT;
+}
+function isDefaultInk(c) {
+  c = (c || "").toLowerCase();
+  return c === DEFAULT_INK_LIGHT || c === DEFAULT_INK_DARK || c === "#000000" || c === "#ffffff";
+}
 
 const $ = (s) => document.querySelector(s);
 
@@ -32,6 +42,8 @@ boot().catch(err => {
 
 async function boot() {
   console.log("%cWhiteboard " + BUILD, "background:#2563eb;color:#fff;padding:2px 8px;border-radius:4px;font-weight:bold");
+  const vp = document.getElementById("versionPill");
+  if (vp) vp.textContent = BUILD;
   applyStoredTheme();
 
   state.board = new Board({
@@ -71,6 +83,13 @@ async function boot() {
   wireTextDialog();
   buildSwatches();
 
+  // Apply a theme-appropriate default ink so strokes are visible from the start.
+  const initialInk = defaultInk();
+  state.board.setColor(initialInk);
+  $("#colorPicker").value = initialInk;
+  updateSwatchActive(initialInk);
+  updateSizePreview();
+
   await maybeAutoConnectSync();
 
   window.addEventListener("beforeunload", () => { flushSave(); sync.flushWrites?.(); });
@@ -88,6 +107,15 @@ function toggleTheme() {
   document.documentElement.dataset.theme = next;
   localStorage.setItem("wb-theme", next);
   updateThemeIcon(next);
+  // If the user is on a default ink color (or one that won't show on the new
+  // background), flip it to the matching default for the new theme.
+  if (state.board && isDefaultInk(state.board.color)) {
+    const c = defaultInk();
+    state.board.setColor(c);
+    $("#colorPicker").value = c;
+    updateSwatchActive(c);
+    updateSizePreview();
+  }
 }
 function updateThemeIcon(theme) {
   const icon = $("#themeIcon");
