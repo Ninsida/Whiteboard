@@ -95,11 +95,14 @@ export function teardown() {
 }
 
 // Debounced write of a board. Multiple rapid changes coalesce into one write.
+// Stores by reference — when the timer fires, the latest state goes out.
+// (No deep clone here: serializing a board with embedded base64 images on
+// every stroke was the main source of pen lag.)
 export function pushBoard(board) {
   if (!workspaceRef) return;
-  pendingWrites.set(board.id, JSON.parse(JSON.stringify(board)));
+  pendingWrites.set(board.id, board);
   if (writeTimer) clearTimeout(writeTimer);
-  writeTimer = setTimeout(flushWrites, 600);
+  writeTimer = setTimeout(flushWrites, 1200);
 }
 
 export async function flushWrites() {

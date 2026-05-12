@@ -293,8 +293,9 @@ export class Board {
       if (this.currentStroke.tool === "eraser") {
         this._applyEraserStroke(this.currentStroke);
       } else {
-        this._pushUndo();
-        this.model.strokes.push(this._compactStroke(this.currentStroke));
+        const compact = this._compactStroke(this.currentStroke);
+        this.model.strokes.push(compact);
+        this._recordOp({ t: "addStroke", stroke: compact });
       }
       this._dirty();
     }
@@ -464,15 +465,18 @@ export class Board {
   /* ---------- Eraser ---------- */
   _applyEraserStroke(stroke) {
     const radius = stroke.size / 2;
-    const before = this.model.strokes.length;
+    const removed = [];
     const kept = [];
-    for (const s of this.model.strokes) {
-      if (this._strokeHitsPath(s, stroke.points, radius + s.size / 2)) continue;
-      kept.push(s);
-    }
-    if (kept.length !== before) {
-      this._pushUndo();
+    this.model.strokes.forEach((s, idx) => {
+      if (this._strokeHitsPath(s, stroke.points, radius + s.size / 2)) {
+        removed.push({ idx, stroke: s });
+      } else {
+        kept.push(s);
+      }
+    });
+    if (removed.length) {
       this.model.strokes = kept;
+      this._recordOp({ t: "eraseStrokes", removed });
       this.fullRedraw();
     }
   }
@@ -501,8 +505,8 @@ export class Board {
     const r = this.stage.getBoundingClientRect();
     const center = pos || this.s2w(r.width / 2, r.height / 2);
     const item = { id, type: "image", dataUrl, x: center.x - iw / 2, y: center.y - ih / 2, w: iw, h: ih };
-    this._pushUndo();
     this.model.items.push(item);
+    this._recordOp({ t: "addItem", id, item });
     this._renderItem(item);
     this._dirty();
     this._updateHint();
@@ -512,8 +516,8 @@ export class Board {
   addText({ x, y, text, color, size, comment }) {
     const id = "t_" + Math.random().toString(36).slice(2, 10);
     const item = { id, type: "text", x, y, text, color, size, comment: !!comment };
-    this._pushUndo();
     this.model.items.push(item);
+    this._recordOp({ t: "addItem", id, item });
     this._renderItem(item);
     this._dirty();
     this._updateHint();
@@ -523,8 +527,10 @@ export class Board {
   updateText(id, patch) {
     const it = this.model.items.find(i => i.id === id);
     if (!it) return;
-    this._pushUndo();
+    const before = {};
+    for (const k of Object.keys(patch)) before[k] = it[k];
     Object.assign(it, patch);
+    this._recordOp({ t: "updateItem", id, before, after: { ...patch } });
     const el = this.overlay.querySelector(`[data-id="${id}"]`);
     if (el) this._applyTextStyle(el, it);
     this._dirty();
@@ -533,8 +539,9 @@ export class Board {
   deleteItem(id) {
     const idx = this.model.items.findIndex(i => i.id === id);
     if (idx < 0) return;
-    this._pushUndo();
+    const item = this.model.items[idx];
     this.model.items.splice(idx, 1);
+    this._recordOp({ t: "deleteItem", index: idx, item });
     const el = this.overlay.querySelector(`[data-id="${id}"]`);
     if (el) el.remove();
     this._dirty();
@@ -622,33 +629,70 @@ export class Board {
     const d = document.createElement("div"); d.className = "del-handle"; d.textContent = "×"; el.appendChild(d);
   }
 
-  /* ---------- Undo / Redo ---------- */
-  _snapshot() {
-    return JSON.stringify({ strokes: this.model.strokes, items: this.model.items, bg: this.model.bg });
-  }
-  _pushUndo() {
-    this.undoStack.push(this._snapshot());
-    if (this.undoStack.length > 60) this.undoStack.shift();
+  /* ---------- Undo / Redo (operation-based, no full snapshots) ---------- */
+  _recordOp(op) {
+    this.undoStack.push(op);
+    if (this.undoStack.length > 100) this.undoStack.shift();
     this.redoStack.length = 0;
   }
+  _applyInverse(op) {
+    const m = this.model;
+    switch (op.t) {
+      case "addStroke": m.strokes.pop(); break;
+      case "eraseStrokes":
+        for (const { idx, stroke } of op.removed.slice().sort((a, b) => a.idx - b.idx)) {
+          m.strokes.splice(Math.min(idx, m.strokes.length), 0, stroke);
+        }
+        break;
+      case "addItem": m.items.splice(m.items.findIndex(i => i.id === op.id), 1); break;
+      case "deleteItem": m.items.splice(op.index, 0, op.item); break;
+      case "updateItem": {
+        const it = m.items.find(i => i.id === op.id);
+        if (it) Object.assign(it, op.before);
+        break;
+      }
+      case "setBg": m.bg = op.from; this.applyBg(); break;
+      case "clear": m.strokes = op.strokes; m.items = op.items; break;
+    }
+  }
+  _applyForward(op) {
+    const m = this.model;
+    switch (op.t) {
+      case "addStroke": m.strokes.push(op.stroke); break;
+      case "eraseStrokes": {
+        const set = new Set(op.removed.map(r => r.stroke));
+        m.strokes = m.strokes.filter(s => !set.has(s));
+        break;
+      }
+      case "addItem": m.items.push(op.item); break;
+      case "deleteItem": m.items.splice(op.index, 1); break;
+      case "updateItem": {
+        const it = m.items.find(i => i.id === op.id);
+        if (it) Object.assign(it, op.after);
+        break;
+      }
+      case "setBg": m.bg = op.to; this.applyBg(); break;
+      case "clear": m.strokes = []; m.items = []; break;
+    }
+  }
   undo() {
-    if (!this.undoStack.length) return;
-    this.redoStack.push(this._snapshot());
-    const s = JSON.parse(this.undoStack.pop());
-    this.model.strokes = s.strokes; this.model.items = s.items; this.model.bg = s.bg;
-    this.applyBg(); this.renderOverlay(); this.fullRedraw();
+    const op = this.undoStack.pop();
+    if (!op) return;
+    this.redoStack.push(op);
+    this._applyInverse(op);
+    this.renderOverlay(); this.fullRedraw();
     this._dirty(); this._updateHint();
   }
   redo() {
-    if (!this.redoStack.length) return;
-    this.undoStack.push(this._snapshot());
-    const s = JSON.parse(this.redoStack.pop());
-    this.model.strokes = s.strokes; this.model.items = s.items; this.model.bg = s.bg;
-    this.applyBg(); this.renderOverlay(); this.fullRedraw();
+    const op = this.redoStack.pop();
+    if (!op) return;
+    this.undoStack.push(op);
+    this._applyForward(op);
+    this.renderOverlay(); this.fullRedraw();
     this._dirty(); this._updateHint();
   }
   clear() {
-    this._pushUndo();
+    this._recordOp({ t: "clear", strokes: this.model.strokes.slice(), items: this.model.items.slice() });
     this.model.strokes = []; this.model.items = [];
     this.renderOverlay(); this.fullRedraw();
     this._dirty(); this._updateHint();

@@ -187,7 +187,7 @@ function onBoardChange() {
 }
 function queueSave() {
   if (state.saveTimer) clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(flushSave, 350);
+  state.saveTimer = setTimeout(flushSave, 800);
 }
 async function flushSave() {
   if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
