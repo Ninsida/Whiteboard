@@ -1,36 +1,67 @@
 <!doctype html>
-<html lang="de">
+<html lang="de" data-theme="light">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-<meta name="theme-color" content="#1a1a1a" />
+<meta name="theme-color" content="#0b1220" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>Whiteboard</title>
 <link rel="stylesheet" href="styles.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%231a1a1a'/><path d='M20 70 L45 45 L55 55 L80 30' stroke='%23fff' stroke-width='8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232563eb'/><path d='M22 70 L42 50 L52 60 L78 32' stroke='%23fff' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
 </head>
 <body>
 <div id="app">
 
   <header id="topbar">
+    <div id="brand">
+      <div class="logo">W</div>
+    </div>
+
     <div id="tabs" role="tablist"></div>
-    <button id="newTabBtn" class="icon-btn" title="Neuer Tab">＋</button>
+    <button id="newTabBtn" class="icon-btn" title="Neuer Tab" aria-label="Neuer Tab">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></svg>
+    </button>
+
     <div class="spacer"></div>
-    <div class="group">
-      <button id="undoBtn" class="icon-btn" title="Rückgängig (Ctrl+Z)">↶</button>
-      <button id="redoBtn" class="icon-btn" title="Wiederholen (Ctrl+Y)">↷</button>
+
+    <div id="penBadge" title="Stift erkannt — Handflächen-Schutz aktiv">
+      <svg viewBox="0 0 24 24"><path d="M3 21l3.5-1 11-11-2.5-2.5-11 11L3 21z"/></svg>
+      <span>Stift</span>
     </div>
+
+    <div id="syncStatus" title="Sync einrichten">
+      <span class="dot"></span>
+      <span class="label">Lokal</span>
+    </div>
+
     <div class="group">
-      <button id="zoomOutBtn" class="icon-btn" title="Herauszoomen">−</button>
+      <button id="undoBtn" class="icon-btn" title="Rückgängig (Ctrl+Z)" aria-label="Rückgängig">
+        <svg viewBox="0 0 24 24"><path d="M9 14l-4-4 4-4 M5 10h9a5 5 0 010 10h-2"/></svg>
+      </button>
+      <button id="redoBtn" class="icon-btn" title="Wiederholen (Ctrl+Y)" aria-label="Wiederholen">
+        <svg viewBox="0 0 24 24"><path d="M15 14l4-4-4-4 M19 10h-9a5 5 0 000 10h2"/></svg>
+      </button>
+    </div>
+
+    <div class="group">
+      <button id="zoomOutBtn" class="icon-btn" title="Herauszoomen" aria-label="Zoom raus">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+      </button>
       <button id="zoomResetBtn" class="icon-btn" title="Zoom zurücksetzen">100%</button>
-      <button id="zoomInBtn" class="icon-btn" title="Hineinzoomen">+</button>
+      <button id="zoomInBtn" class="icon-btn" title="Hineinzoomen" aria-label="Zoom rein">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></svg>
+      </button>
     </div>
+
     <div class="group">
-      <button id="exportPngBtn" class="icon-btn" title="Als PNG exportieren">PNG</button>
-      <button id="exportJsonBtn" class="icon-btn" title="Als JSON exportieren">JSON</button>
-      <button id="importJsonBtn" class="icon-btn" title="JSON importieren">⇪</button>
-      <input id="importFile" type="file" accept="application/json" hidden />
+      <button id="themeBtn" class="icon-btn" title="Theme umschalten" aria-label="Theme">
+        <svg id="themeIcon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+      </button>
+      <button id="menuBtn" class="icon-btn" title="Menü" aria-label="Menü">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>
+      </button>
     </div>
-    <button id="menuBtn" class="icon-btn" title="Menü">⋯</button>
   </header>
 
   <aside id="toolbar">
@@ -38,7 +69,7 @@
       <svg viewBox="0 0 24 24"><path d="M3 21l3.5-1 11-11-2.5-2.5-11 11L3 21z M14 7l3 3"/></svg>
     </button>
     <button class="tool" data-tool="marker" title="Marker (M)">
-      <svg viewBox="0 0 24 24"><path d="M4 19h16 M6 16l4-10h4l4 10" stroke-width="2.5"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M4 19h16 M6 16l4-10h4l4 10" stroke-width="2.2"/></svg>
     </button>
     <button class="tool" data-tool="eraser" title="Radierer (E)">
       <svg viewBox="0 0 24 24"><path d="M4 20h16 M7 16l9-9 4 4-9 9H7z"/></svg>
@@ -46,15 +77,15 @@
     <button class="tool" data-tool="text" title="Text / Kommentar (T)">
       <svg viewBox="0 0 24 24"><path d="M6 6h12 M12 6v14 M9 20h6"/></svg>
     </button>
-    <button class="tool" data-tool="select" title="Auswählen/Verschieben (V)">
+    <button class="tool" data-tool="select" title="Auswählen / Verschieben (V)">
       <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6-6-16z"/></svg>
     </button>
     <button class="tool" data-tool="hand" title="Verschieben (H / Leertaste)">
       <svg viewBox="0 0 24 24"><path d="M8 11V5a1.5 1.5 0 013 0v6 M11 11V4a1.5 1.5 0 013 0v7 M14 11V5a1.5 1.5 0 013 0v9c0 4-3 7-7 7s-7-3-7-7v-3a1.5 1.5 0 013 0v2"/></svg>
     </button>
     <div class="sep"></div>
-    <label class="color-wrap" title="Farbe">
-      <input id="colorPicker" type="color" value="#1a1a1a" />
+    <label class="color-wrap" title="Farbe wählen">
+      <input id="colorPicker" type="color" value="#0f172a" />
     </label>
     <div class="swatches" id="swatches"></div>
     <div class="sep"></div>
@@ -63,41 +94,100 @@
       <div id="sizePreview" class="size-preview"></div>
     </div>
     <div class="sep"></div>
-    <button class="tool" id="imgBtn" title="Bild / Datei einfügen">
+    <button class="tool" id="imgBtn" title="Bild einfügen">
       <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/></svg>
     </button>
-    <input id="imgInput" type="file" accept="image/*,application/pdf" multiple hidden />
+    <input id="imgInput" type="file" accept="image/*" multiple hidden />
   </aside>
 
   <main id="stage">
     <canvas id="canvas"></canvas>
     <div id="overlay"></div>
-    <div id="selection"></div>
-    <div id="hint" class="hint">Leinwand leer — schreib drauf los, zieh Bilder rein oder drück <b>T</b> für Text.</div>
+    <div id="hint" class="hint">Schreib einfach drauf los — oder zieh ein Bild rein, drück <b>T</b> für Text.</div>
   </main>
 
+  <!-- Menu -->
   <div id="menu" class="menu hidden">
-    <button data-act="rename">Tab umbenennen</button>
-    <button data-act="duplicate">Tab duplizieren</button>
-    <button data-act="clear">Tab leeren</button>
-    <button data-act="delete" class="danger">Tab löschen</button>
+    <button data-act="rename">✎ Tab umbenennen</button>
+    <button data-act="duplicate">⎘ Tab duplizieren</button>
+    <button data-act="clear">⌫ Tab leeren</button>
+    <button data-act="delete" class="danger">🗑 Tab löschen</button>
     <hr />
-    <button data-act="bg-white">Hintergrund: Weiß</button>
-    <button data-act="bg-grid">Hintergrund: Raster</button>
-    <button data-act="bg-dots">Hintergrund: Punkte</button>
-    <button data-act="bg-lines">Hintergrund: Linien</button>
+    <button data-act="bg-white">○ Hintergrund: Weiß</button>
+    <button data-act="bg-grid">▦ Hintergrund: Raster</button>
+    <button data-act="bg-dots">⋯ Hintergrund: Punkte</button>
+    <button data-act="bg-lines">≡ Hintergrund: Linien</button>
     <hr />
-    <button data-act="about">Info</button>
+    <button data-act="sync">☁ Sync einrichten</button>
+    <button data-act="export-png">⬇ Als PNG</button>
+    <button data-act="export-json">⬇ Als JSON</button>
+    <button data-act="import-json">⬆ JSON importieren</button>
+    <input id="importFile" type="file" accept="application/json" hidden />
+    <hr />
+    <button data-act="palm">✋ Handflächen-Schutz <span id="palmState">auto</span></button>
+    <button data-act="about">ⓘ Info</button>
   </div>
 
-  <div id="textEditor" class="text-editor hidden">
-    <textarea placeholder="Text eingeben..."></textarea>
-    <div class="row">
-      <input type="color" id="textColor" value="#1a1a1a" />
-      <input type="range" id="textSize" min="10" max="96" value="20" />
-      <label class="comment-toggle"><input type="checkbox" id="textIsComment" /> Kommentar</label>
-      <button id="textCancel">Abbrechen</button>
-      <button id="textSave" class="primary">OK</button>
+  <!-- Text editor modal -->
+  <div id="textBackdrop" class="backdrop hidden">
+    <div id="textEditor" class="dialog text-editor">
+      <header><h2>Text</h2><button class="close" id="textCancel">×</button></header>
+      <div class="body">
+        <textarea placeholder="Text eingeben..."></textarea>
+        <div class="row">
+          <input type="color" id="textColor" value="#0f172a" />
+          <input type="range" id="textSize" min="10" max="96" value="20" />
+          <label class="comment-toggle"><input type="checkbox" id="textIsComment" /> Als Kommentar</label>
+        </div>
+      </div>
+      <footer>
+        <button id="textCancel2">Abbrechen</button>
+        <button id="textSave" class="primary">OK</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Sync setup dialog -->
+  <div id="syncBackdrop" class="backdrop hidden">
+    <div class="dialog">
+      <header><h2>Sync einrichten</h2><button class="close" id="syncClose">×</button></header>
+      <div class="body">
+        <p>Sync deine Boards zwischen iPad und PC über deine eigene <b>Firebase</b>-Datenbank — kostenlos, deine Daten, niemand sonst kommt ran.</p>
+
+        <details>
+          <summary style="cursor:pointer; font-weight:600; color:var(--text); margin-bottom:8px;">📋 Einrichtungs-Schritte (einmal, ca. 2 Minuten)</summary>
+          <ol class="steps">
+            <li>Öffne <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a> und logg dich mit Google ein.</li>
+            <li>Klick <b>„Projekt hinzufügen"</b> → Name vergeben (z.B. „mein-whiteboard") → <b>Erstellen</b>. Analytics kannst du aus lassen.</li>
+            <li>Im Projekt links auf <b>„Realtime Database"</b> → <b>„Datenbank erstellen"</b> → Region wählen (Europa) → <b>„Im Testmodus starten"</b> → Aktivieren.</li>
+            <li>Oben links auf das <b>⚙ (Zahnrad)</b> → <b>Projekteinstellungen</b> → unten bei <b>„Deine Apps"</b> auf das <b>&lt;/&gt;</b>-Symbol klicken (Web-App).</li>
+            <li>Beliebigen App-Namen eingeben → <b>Registrieren</b>. <b>Hosting nicht aktivieren</b>.</li>
+            <li>Die gezeigte <code>firebaseConfig</code> kopieren (das ganze JS-Objekt zwischen <code>{ ... }</code>) und unten einfügen.</li>
+          </ol>
+        </details>
+
+        <div>
+          <label for="syncConfig">Firebase Config</label>
+          <textarea id="syncConfig" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "...", "projectId": "...", ... }'></textarea>
+          <p style="font-size:12px; margin-top:6px;">⚠ Wichtig: Die Config muss <code>databaseURL</code> enthalten. Falls nicht: in Firebase die Realtime Database erst aktivieren.</p>
+        </div>
+
+        <div>
+          <label for="syncWorkspace">Workspace-Code (Geheim — auf allen Geräten gleich!)</label>
+          <div class="copy-row">
+            <input type="text" id="syncWorkspace" />
+            <button id="syncGenerate">Neu</button>
+            <button id="syncCopy">Kopieren</button>
+          </div>
+          <p style="font-size:12px; margin-top:6px;">Auf einem Gerät generieren, kopieren, auf dem anderen Gerät einfügen. Wer den Code hat, sieht die Boards — also nicht weitergeben.</p>
+        </div>
+      </div>
+      <footer>
+        <button id="syncDisable" class="danger">Sync deaktivieren</button>
+        <span style="flex:1"></span>
+        <button id="syncCancel">Abbrechen</button>
+        <button id="syncSave" class="primary">Verbinden</button>
+      </footer>
     </div>
   </div>
 

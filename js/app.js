@@ -1,57 +1,60 @@
-// App controller: tabs, toolbar wiring, persistence orchestration.
+// App controller: tabs, toolbar, theme, sync, text editor, drag-drop.
 
 import { Board, createBoardModel } from "./board.js";
 import * as db from "./storage.js";
+import * as sync from "./sync.js";
 
 const SWATCH_COLORS = [
-  "#1a1a1a", "#ffffff",
+  "#0f172a", "#ffffff",
   "#dc2626", "#ea580c",
   "#ca8a04", "#16a34a",
   "#0284c7", "#2563eb",
   "#7c3aed", "#db2777",
 ];
 
+const $ = (s) => document.querySelector(s);
+
 const state = {
-  boards: [],      // array of board models (without strokes loaded for list view? we keep full)
+  boards: [],
   activeId: null,
-  board: null,     // active Board instance
+  board: null,
   saveTimer: null,
+  palmMode: "auto", // auto | on | off
+  penEverSeen: false,
 };
 
-const $ = (s) => document.querySelector(s);
-const stage = $("#stage");
-const canvas = $("#canvas");
-const overlay = $("#overlay");
-const tabsEl = $("#tabs");
-const hintEl = $("#hint");
-
-// --- Init ---
 boot().catch(err => {
   console.error(err);
   toast("Fehler beim Start: " + err.message);
 });
 
 async function boot() {
+  applyStoredTheme();
+
   state.board = new Board({
-    stage, canvas, overlay,
-    onChange: queueSave,
+    stage: $("#stage"),
+    canvas: $("#canvas"),
+    overlay: $("#overlay"),
+    onChange: onBoardChange,
     onRequestText: openTextEditor,
-    onHintChange: (empty) => hintEl.classList.toggle("hidden", !empty),
+    onHintChange: (empty) => $("#hint").classList.toggle("hidden", !empty),
+    onPenDetected: onPenDetected,
   });
 
-  const boards = await db.listBoards();
-  state.boards = boards.sort((a, b) => a.created - b.created || 0);
-  const activeId = await db.getMeta("activeId");
+  // load boards
+  let boards = await db.listBoards();
+  // strip any legacy `blobId` items (no longer supported) so they don't break rendering
+  for (const b of boards) {
+    if (b.items) b.items = b.items.filter(it => it.type !== "image" || it.dataUrl);
+  }
+  state.boards = boards.sort((a, b) => (a.created || 0) - (b.created || 0));
   if (!state.boards.length) {
     const b = createBoardModel("Tab 1");
-    b.created = Date.now();
     state.boards.push(b);
     await db.saveBoard(b);
-    state.activeId = b.id;
-    await db.setMeta("activeId", b.id);
-  } else {
-    state.activeId = (activeId && state.boards.find(b => b.id === activeId)) ? activeId : state.boards[0].id;
   }
+  const stored = await db.getMeta("activeId");
+  state.activeId = (stored && state.boards.find(b => b.id === stored)) ? stored : state.boards[0].id;
 
   renderTabs();
   await activate(state.activeId);
@@ -60,15 +63,42 @@ async function boot() {
   wireTopbar();
   wireKeyboard();
   wireDropZone();
-  wireTextEditor();
+  wireMenu();
+  wireSyncDialog();
+  wireTextDialog();
   buildSwatches();
 
-  // guard against accidental reload losing unsaved state
-  window.addEventListener("beforeunload", () => { flushSave(); });
+  await maybeAutoConnectSync();
+
+  window.addEventListener("beforeunload", () => { flushSave(); sync.flushWrites?.(); });
 }
 
-// --- Tabs ---
+/* ---------- Theme ---------- */
+function applyStoredTheme() {
+  const t = localStorage.getItem("wb-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = t;
+  updateThemeIcon(t);
+}
+function toggleTheme() {
+  const cur = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("wb-theme", next);
+  updateThemeIcon(next);
+}
+function updateThemeIcon(theme) {
+  const icon = $("#themeIcon");
+  if (!icon) return;
+  if (theme === "dark") {
+    icon.innerHTML = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2 M12 20v2 M4.93 4.93l1.41 1.41 M17.66 17.66l1.41 1.41 M2 12h2 M20 12h2 M4.93 19.07l1.41-1.41 M17.66 6.34l1.41-1.41"/>';
+  } else {
+    icon.innerHTML = '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>';
+  }
+}
+
+/* ---------- Tabs ---------- */
 function renderTabs() {
+  const tabsEl = $("#tabs");
   tabsEl.innerHTML = "";
   for (const b of state.boards) {
     const el = document.createElement("button");
@@ -76,14 +106,12 @@ function renderTabs() {
     el.dataset.id = b.id;
     el.innerHTML = `
       <span class="dot" style="background:${colorForBoard(b.id)}"></span>
-      <span class="name">${escapeHtml(b.name)}</span>
+      <span class="name"></span>
       <span class="close" title="Schließen">×</span>`;
+    el.querySelector(".name").textContent = b.name;
     el.addEventListener("click", (e) => {
-      if (e.target.classList.contains("close")) {
-        deleteTab(b.id);
-      } else {
-        activate(b.id);
-      }
+      if (e.target.classList.contains("close")) deleteTab(b.id);
+      else activate(b.id);
     });
     el.addEventListener("dblclick", (e) => {
       if (e.target.classList.contains("close")) return;
@@ -92,16 +120,14 @@ function renderTabs() {
     tabsEl.appendChild(el);
   }
 }
-
 function colorForBoard(id) {
-  // stable pseudo-color per tab
   let h = 0;
   for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return `hsl(${h % 360} 70% 55%)`;
 }
 
 async function activate(id) {
-  flushSave();
+  await flushSave();
   const model = state.boards.find(b => b.id === id);
   if (!model) return;
   state.activeId = id;
@@ -109,35 +135,25 @@ async function activate(id) {
   state.board.setModel(model);
   renderTabs();
 }
-
 async function newTab() {
-  flushSave();
-  const name = "Tab " + (state.boards.length + 1);
-  const b = createBoardModel(name);
-  b.created = Date.now();
+  await flushSave();
+  const b = createBoardModel("Tab " + (state.boards.length + 1));
   state.boards.push(b);
   await db.saveBoard(b);
+  if (sync.isEnabled()) sync.pushBoard(b);
   await activate(b.id);
 }
-
 async function deleteTab(id) {
-  if (state.boards.length <= 1) {
-    toast("Mindestens ein Tab muss bleiben");
-    return;
-  }
+  if (state.boards.length <= 1) { toast("Mindestens ein Tab muss bleiben"); return; }
   const b = state.boards.find(x => x.id === id);
   if (!b) return;
   if (!confirm(`Tab "${b.name}" wirklich löschen?`)) return;
   state.boards = state.boards.filter(x => x.id !== id);
   await db.deleteBoard(id);
-  if (state.activeId === id) {
-    await activate(state.boards[0].id);
-  } else {
-    renderTabs();
-  }
-  db.gcBlobs();
+  if (sync.isEnabled()) sync.deleteBoardRemote(id);
+  if (state.activeId === id) await activate(state.boards[0].id);
+  else renderTabs();
 }
-
 async function renameTab(id) {
   const b = state.boards.find(x => x.id === id);
   if (!b) return;
@@ -146,10 +162,11 @@ async function renameTab(id) {
   const trimmed = name.trim();
   if (!trimmed) return;
   b.name = trimmed.slice(0, 40);
+  b.updated = Date.now();
   await db.saveBoard(b);
+  if (sync.isEnabled()) sync.pushBoard(b);
   renderTabs();
 }
-
 async function duplicateTab(id) {
   const src = state.boards.find(x => x.id === id);
   if (!src) return;
@@ -157,25 +174,38 @@ async function duplicateTab(id) {
   copy.id = createBoardModel().id;
   copy.name = src.name + " (Kopie)";
   copy.created = Date.now();
-  // reuse blob ids — blobs are shared, GC handles lifetime once BOTH boards drop refs
+  copy.updated = Date.now();
   state.boards.push(copy);
   await db.saveBoard(copy);
+  if (sync.isEnabled()) sync.pushBoard(copy);
   await activate(copy.id);
 }
 
-// --- Saving ---
+/* ---------- Save / sync orchestration ---------- */
+function onBoardChange() {
+  queueSave();
+}
 function queueSave() {
   if (state.saveTimer) clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(flushSave, 400);
+  state.saveTimer = setTimeout(flushSave, 350);
 }
 async function flushSave() {
   if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
   const b = state.boards.find(x => x.id === state.activeId);
   if (!b) return;
-  try { await db.saveBoard(b); } catch (e) { console.warn("save failed", e); }
+  try {
+    await db.saveBoard(b);
+    if (sync.isEnabled()) sync.pushBoard(b);
+  } catch (e) { console.warn("save failed", e); }
 }
 
-// --- Toolbar ---
+/* ---------- Pen detection ---------- */
+function onPenDetected(active) {
+  state.penEverSeen = state.penEverSeen || active;
+  $("#penBadge").classList.toggle("visible", active && state.palmMode !== "off");
+}
+
+/* ---------- Toolbar ---------- */
 function wireToolbar() {
   document.querySelectorAll(".tool[data-tool]").forEach(btn => {
     btn.addEventListener("click", () => selectTool(btn.dataset.tool));
@@ -199,25 +229,20 @@ function wireToolbar() {
   $("#imgBtn").addEventListener("click", () => $("#imgInput").click());
   $("#imgInput").addEventListener("change", async (e) => {
     for (const f of e.target.files) {
-      if (f.type.startsWith("image/")) {
-        await state.board.addImageFromBlob(f);
-      } else {
-        toast(`"${f.name}" wird nicht als Bild unterstützt.`);
-      }
+      if (f.type.startsWith("image/")) await state.board.addImageFromBlob(f);
+      else toast(`"${f.name}" wird nicht als Bild unterstützt.`);
     }
     e.target.value = "";
   });
 }
-
 function selectTool(t) {
   state.board.setTool(t);
   document.querySelectorAll(".tool[data-tool]").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === t));
-  const app = document.getElementById("app");
-  app.className = ""; // clear
+  const app = $("#app");
+  app.classList.remove("tool-pen", "tool-marker", "tool-eraser", "tool-text", "tool-select", "tool-hand");
   app.classList.add("tool-" + t);
 }
-
 function buildSwatches() {
   const wrap = $("#swatches");
   wrap.innerHTML = "";
@@ -234,22 +259,20 @@ function buildSwatches() {
     });
     wrap.appendChild(s);
   }
-  updateSwatchActive("#1a1a1a");
+  updateSwatchActive("#0f172a");
 }
-
 function updateSwatchActive(color) {
   document.querySelectorAll(".swatch").forEach(s =>
     s.classList.toggle("active", s.dataset.color.toLowerCase() === color.toLowerCase()));
 }
-
 function updateSizePreview() {
-  const size = +$("#sizeSlider").value;
+  const sz = +$("#sizeSlider").value;
   const preview = $("#sizePreview");
-  preview.style.setProperty("--size", Math.min(36, size) + "px");
+  preview.style.setProperty("--size", Math.min(36, sz) + "px");
   preview.style.color = $("#colorPicker").value;
 }
 
-// --- Topbar ---
+/* ---------- Topbar ---------- */
 function wireTopbar() {
   $("#newTabBtn").addEventListener("click", newTab);
   $("#undoBtn").addEventListener("click", () => state.board.undo());
@@ -257,77 +280,26 @@ function wireTopbar() {
   $("#zoomInBtn").addEventListener("click", () => state.board.setZoom(state.board.model.view.scale * 1.2));
   $("#zoomOutBtn").addEventListener("click", () => state.board.setZoom(state.board.model.view.scale / 1.2));
   $("#zoomResetBtn").addEventListener("click", () => state.board.resetZoom());
+  $("#themeBtn").addEventListener("click", toggleTheme);
+  $("#syncStatus").addEventListener("click", openSyncDialog);
+}
 
-  $("#exportPngBtn").addEventListener("click", async () => {
-    const url = await state.board.exportPng();
-    if (!url) { toast("Nichts zu exportieren"); return; }
-    const a = document.createElement("a");
-    const b = state.boards.find(x => x.id === state.activeId);
-    a.download = (b ? b.name : "whiteboard") + ".png";
-    a.href = url;
-    a.click();
-  });
-
-  $("#exportJsonBtn").addEventListener("click", async () => {
-    const b = state.boards.find(x => x.id === state.activeId);
-    if (!b) return;
-    // embed blobs as base64 for portability
-    const exp = JSON.parse(JSON.stringify(b));
-    exp.blobs = {};
-    for (const it of exp.items) {
-      if (it.blobId && !exp.blobs[it.blobId]) {
-        const blob = await db.loadBlob(it.blobId);
-        if (blob) exp.blobs[it.blobId] = await blobToDataURL(blob);
-      }
-    }
-    const blob = new Blob([JSON.stringify(exp)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = b.name + ".json";
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  $("#importJsonBtn").addEventListener("click", () => $("#importFile").click());
-  $("#importFile").addEventListener("change", async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    try {
-      const obj = JSON.parse(await f.text());
-      if (!obj.id || !obj.name) throw new Error("Ungültiges Format");
-      obj.id = createBoardModel().id; // new id to avoid clashes
-      obj.created = Date.now();
-      if (obj.blobs) {
-        for (const [bid, url] of Object.entries(obj.blobs)) {
-          const blob = await dataURLToBlob(url);
-          // need to replace the blob id to something fresh? safer to keep original id
-          await db.saveBlob(bid, blob);
-        }
-        delete obj.blobs;
-      }
-      state.boards.push(obj);
-      await db.saveBoard(obj);
-      await activate(obj.id);
-      toast("Importiert");
-    } catch (err) {
-      toast("Import fehlgeschlagen: " + err.message);
-    }
-    e.target.value = "";
-  });
-
+/* ---------- Menu ---------- */
+function wireMenu() {
   const menu = $("#menu");
   $("#menuBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     menu.classList.toggle("hidden");
+    updatePalmStateLabel();
   });
   document.addEventListener("click", (e) => {
     if (!menu.contains(e.target) && e.target !== $("#menuBtn")) menu.classList.add("hidden");
   });
   menu.addEventListener("click", async (e) => {
-    const act = e.target.dataset.act;
-    if (!act) return;
-    menu.classList.add("hidden");
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act !== "palm") menu.classList.add("hidden");
     const b = state.boards.find(x => x.id === state.activeId);
     switch (act) {
       case "rename": renameTab(state.activeId); break;
@@ -340,17 +312,76 @@ function wireTopbar() {
       case "bg-grid": state.board.setBg("grid"); break;
       case "bg-dots": state.board.setBg("dots"); break;
       case "bg-lines": state.board.setBg("lines"); break;
+      case "sync": openSyncDialog(); break;
+      case "export-png": await doExportPng(b); break;
+      case "export-json": await doExportJson(b); break;
+      case "import-json": $("#importFile").click(); break;
+      case "palm": cyclePalmMode(); break;
       case "about":
-        alert("Whiteboard — läuft komplett im Browser, Daten bleiben lokal gespeichert (IndexedDB). Stylus/Tablet via Pointer Events mit Druck. Tastenkürzel: P Stift, M Marker, E Radierer, T Text, V Auswahl, H verschieben, Strg+Z Undo, Strg+Y Redo, Strg+S Speichern, Leertaste halten = verschieben.");
+        alert("Whiteboard — läuft komplett im Browser. Daten lokal in IndexedDB + optional via Firebase synchronisiert.\n\nTastenkürzel:\nP Stift · M Marker · E Radierer · T Text · V Auswahl · H Verschieben\nCtrl+Z / Ctrl+Shift+Z Undo/Redo · Ctrl+S Speichern · Ctrl+T neuer Tab · Leertaste = Verschieben");
         break;
     }
   });
+  $("#importFile").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      const obj = JSON.parse(await f.text());
+      if (!obj.id || !obj.name) throw new Error("Ungültiges Format");
+      obj.id = createBoardModel().id;
+      obj.created = Date.now();
+      obj.updated = Date.now();
+      state.boards.push(obj);
+      await db.saveBoard(obj);
+      if (sync.isEnabled()) sync.pushBoard(obj);
+      await activate(obj.id);
+      toast("Importiert");
+    } catch (err) {
+      toast("Import fehlgeschlagen: " + err.message);
+    }
+    e.target.value = "";
+  });
 }
 
-// --- Keyboard ---
+function cyclePalmMode() {
+  const order = ["auto", "on", "off"];
+  const idx = order.indexOf(state.palmMode);
+  state.palmMode = order[(idx + 1) % 3];
+  state.board.setPalmMode(state.palmMode);
+  updatePalmStateLabel();
+  if (state.palmMode === "off") $("#penBadge").classList.remove("visible");
+  toast("Handflächen-Schutz: " + palmLabel(state.palmMode));
+}
+function palmLabel(m) {
+  return m === "auto" ? "auto (Stift erkannt)" : m === "on" ? "immer an" : "aus";
+}
+function updatePalmStateLabel() {
+  const el = $("#palmState");
+  if (el) el.textContent = state.palmMode;
+}
+
+async function doExportPng(b) {
+  const url = await state.board.exportPng();
+  if (!url) { toast("Nichts zu exportieren"); return; }
+  const a = document.createElement("a");
+  a.download = (b ? b.name : "whiteboard") + ".png";
+  a.href = url;
+  a.click();
+}
+async function doExportJson(b) {
+  if (!b) return;
+  const blob = new Blob([JSON.stringify(b, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = b.name + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------- Keyboard ---------- */
 function wireKeyboard() {
   document.addEventListener("keydown", (e) => {
-    // ignore when typing in inputs
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
@@ -360,18 +391,14 @@ function wireKeyboard() {
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-      e.preventDefault();
-      state.board.redo();
-      return;
+      e.preventDefault(); state.board.redo(); return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-      e.preventDefault(); flushSave(); toast("Gespeichert");
-      return;
+      e.preventDefault(); flushSave(); toast("Gespeichert"); return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t") {
       e.preventDefault(); newTab(); return;
     }
-
     if (e.code === "Space") {
       if (!state.spaceDown) {
         state.prevTool = state.board.tool;
@@ -382,16 +409,13 @@ function wireKeyboard() {
       return;
     }
     if (e.key === "Delete" || e.key === "Backspace") {
-      const sel = overlay.querySelector(".item.selected");
-      if (sel) {
-        e.preventDefault();
-        state.board.deleteItem(sel.dataset.id);
-      }
+      const sel = $("#overlay").querySelector(".item.selected");
+      if (sel) { e.preventDefault(); state.board.deleteItem(sel.dataset.id); }
       return;
     }
     const map = { p: "pen", m: "marker", e: "eraser", t: "text", v: "select", h: "hand" };
     const k = e.key.toLowerCase();
-    if (map[k]) { selectTool(map[k]); }
+    if (map[k]) selectTool(map[k]);
   });
   document.addEventListener("keyup", (e) => {
     if (e.code === "Space" && state.spaceDown) {
@@ -401,8 +425,9 @@ function wireKeyboard() {
   });
 }
 
-// --- Drop zone ---
+/* ---------- Drop zone + paste ---------- */
 function wireDropZone() {
+  const stage = $("#stage");
   let overlayEl = null;
   stage.addEventListener("dragover", (e) => {
     if (!hasFiles(e)) return;
@@ -422,38 +447,34 @@ function wireDropZone() {
     if (overlayEl) { overlayEl.remove(); overlayEl = null; }
     const r = stage.getBoundingClientRect();
     const pos = state.board.s2w(e.clientX - r.left, e.clientY - r.top);
-    const files = [...(e.dataTransfer?.files || [])];
-    for (const f of files) {
-      if (f.type.startsWith("image/")) {
-        await state.board.addImageFromBlob(f, pos);
-      } else {
-        toast(`"${f.name}" ist kein Bild — wird ignoriert.`);
-      }
+    for (const f of [...(e.dataTransfer?.files || [])]) {
+      if (f.type.startsWith("image/")) await state.board.addImageFromBlob(f, pos);
+      else toast(`"${f.name}" ist kein Bild — ignoriert.`);
     }
   });
-  // paste images from clipboard
   document.addEventListener("paste", async (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const it of items) {
       if (it.kind === "file" && it.type.startsWith("image/")) {
-        const blob = it.getAsFile();
-        await state.board.addImageFromBlob(blob);
+        await state.board.addImageFromBlob(it.getAsFile());
       }
     }
   });
 }
-
 function hasFiles(e) {
-  const t = e.dataTransfer;
-  if (!t) return false;
-  return [...(t.items || [])].some(i => i.kind === "file");
+  return [...(e.dataTransfer?.items || [])].some(i => i.kind === "file");
 }
 
-// --- Text editor modal ---
+/* ---------- Text editor dialog ---------- */
+function wireTextDialog() {
+  $("#textCancel").addEventListener("click", closeTextEditor);
+  $("#textCancel2").addEventListener("click", closeTextEditor);
+}
+let textEditorContext = null;
 function openTextEditor({ x, y, editId }) {
-  const el = $("#textEditor");
-  const ta = el.querySelector("textarea");
+  const back = $("#textBackdrop");
+  const ta = $("#textEditor textarea");
   const colorI = $("#textColor");
   const sizeI = $("#textSize");
   const commentI = $("#textIsComment");
@@ -463,7 +484,7 @@ function openTextEditor({ x, y, editId }) {
     editItem = state.board.model.items.find(i => i.id === editId);
     if (!editItem) return;
     ta.value = editItem.text || "";
-    colorI.value = editItem.color || "#1a1a1a";
+    colorI.value = editItem.color || "#0f172a";
     sizeI.value = editItem.size || 20;
     commentI.checked = !!editItem.comment;
   } else {
@@ -473,12 +494,13 @@ function openTextEditor({ x, y, editId }) {
     commentI.checked = false;
   }
 
-  el.classList.remove("hidden");
-  setTimeout(() => ta.focus(), 10);
+  textEditorContext = { x, y, editItem };
+  back.classList.remove("hidden");
+  setTimeout(() => ta.focus(), 30);
 
-  const save = () => {
+  const onSave = () => {
     const text = ta.value.trim();
-    el.classList.add("hidden");
+    closeTextEditor();
     if (!text && !editItem) return;
     if (editItem) {
       if (!text) { state.board.deleteItem(editItem.id); return; }
@@ -486,56 +508,166 @@ function openTextEditor({ x, y, editId }) {
         text, color: colorI.value, size: +sizeI.value, comment: commentI.checked,
       });
     } else {
-      state.board.addText({
-        x, y, text, color: colorI.value, size: +sizeI.value, comment: commentI.checked,
-      });
+      state.board.addText({ x, y, text, color: colorI.value, size: +sizeI.value, comment: commentI.checked });
     }
-    cleanup();
   };
-  const cancel = () => { el.classList.add("hidden"); cleanup(); };
-  const onKey = (e) => {
-    if (e.key === "Escape") cancel();
-    else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) save();
+  // re-bind save handler each open
+  const saveBtn = $("#textSave");
+  saveBtn.onclick = onSave;
+  ta.onkeydown = (e) => {
+    if (e.key === "Escape") closeTextEditor();
+    else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) onSave();
   };
+}
+function closeTextEditor() {
+  $("#textBackdrop").classList.add("hidden");
+  textEditorContext = null;
+}
 
-  function cleanup() {
-    $("#textSave").removeEventListener("click", save);
-    $("#textCancel").removeEventListener("click", cancel);
-    ta.removeEventListener("keydown", onKey);
+/* ---------- Sync dialog ---------- */
+function wireSyncDialog() {
+  $("#syncClose").addEventListener("click", () => $("#syncBackdrop").classList.add("hidden"));
+  $("#syncCancel").addEventListener("click", () => $("#syncBackdrop").classList.add("hidden"));
+  $("#syncGenerate").addEventListener("click", () => {
+    $("#syncWorkspace").value = sync.newWorkspaceCode();
+  });
+  $("#syncCopy").addEventListener("click", async () => {
+    const w = $("#syncWorkspace");
+    w.select();
+    try { await navigator.clipboard.writeText(w.value); toast("Kopiert"); }
+    catch { document.execCommand("copy"); toast("Kopiert"); }
+  });
+  $("#syncDisable").addEventListener("click", () => {
+    sync.teardown();
+    sync.clearSettings();
+    $("#syncBackdrop").classList.add("hidden");
+    updateSyncStatus("idle");
+    toast("Sync deaktiviert");
+  });
+  $("#syncSave").addEventListener("click", async () => {
+    const configRaw = $("#syncConfig").value.trim();
+    const workspaceId = $("#syncWorkspace").value.trim();
+    let config;
+    try {
+      config = parseFirebaseConfig(configRaw);
+    } catch (err) {
+      toast("Config-Fehler: " + err.message);
+      return;
+    }
+    try {
+      sync.saveSettings({ config, workspaceId, enabled: true });
+      await connectSync(config, workspaceId, /*initialPush=*/true);
+      $("#syncBackdrop").classList.add("hidden");
+      toast("Sync verbunden");
+    } catch (err) {
+      toast("Verbindung fehlgeschlagen: " + err.message);
+      updateSyncStatus("error");
+    }
+  });
+}
+
+function openSyncDialog() {
+  const back = $("#syncBackdrop");
+  const settings = sync.loadSettings();
+  if (settings) {
+    $("#syncConfig").value = JSON.stringify(settings.config, null, 2);
+    $("#syncWorkspace").value = settings.workspaceId || "";
+  } else {
+    if (!$("#syncWorkspace").value) $("#syncWorkspace").value = sync.newWorkspaceCode();
   }
-
-  $("#textSave").addEventListener("click", save);
-  $("#textCancel").addEventListener("click", cancel);
-  ta.addEventListener("keydown", onKey);
+  back.classList.remove("hidden");
 }
 
-function wireTextEditor() {
-  // one-time nothing (handlers attached per-open), but keep for clarity
+function parseFirebaseConfig(raw) {
+  if (!raw) throw new Error("Config ist leer");
+  // Tolerate the "firebaseConfig = {...}" form people copy from Firebase docs
+  let s = raw.replace(/^[\s\S]*?(\{)/, "$1");
+  // Strip trailing semicolons / extra text after the closing brace
+  const lastBrace = s.lastIndexOf("}");
+  if (lastBrace > 0) s = s.slice(0, lastBrace + 1);
+  // Allow JS-style (unquoted keys, single quotes)
+  let obj;
+  try { obj = JSON.parse(s); }
+  catch {
+    try { obj = Function('"use strict"; return (' + s + ')')(); }
+    catch (e) { throw new Error("Konnte Config nicht lesen"); }
+  }
+  if (!obj || typeof obj !== "object") throw new Error("Config ist kein Objekt");
+  if (!obj.databaseURL) throw new Error("databaseURL fehlt — Realtime Database in Firebase aktivieren");
+  return obj;
 }
 
-// --- Utils ---
+async function maybeAutoConnectSync() {
+  const settings = sync.loadSettings();
+  if (!settings || !settings.enabled) return;
+  try {
+    await connectSync(settings.config, settings.workspaceId, /*initialPush=*/false);
+  } catch (err) {
+    console.warn("auto-sync failed:", err);
+    updateSyncStatus("error");
+  }
+}
+
+async function connectSync(config, workspaceId, initialPush) {
+  updateSyncStatus("connecting");
+  await sync.init({
+    config, workspaceId,
+    onRemoteBoard: handleRemoteBoard,
+    onRemoteDelete: handleRemoteDelete,
+    onStatus: updateSyncStatus,
+  });
+  if (initialPush) {
+    for (const b of state.boards) sync.pushBoard(b);
+    await sync.flushWrites();
+  }
+}
+
+async function handleRemoteBoard(remote) {
+  if (!remote || !remote.id) return;
+  const local = state.boards.find(b => b.id === remote.id);
+  // last-write-wins by `updated` timestamp
+  if (!local) {
+    state.boards.push(remote);
+    await db.saveBoard(remote);
+    renderTabs();
+    return;
+  }
+  if ((remote.updated || 0) <= (local.updated || 0)) return;
+  // Don't yank the canvas if user is actively drawing
+  if (state.board.currentStroke && state.activeId === remote.id) return;
+  Object.assign(local, remote);
+  await db.saveBoard(local);
+  if (state.activeId === local.id) state.board.setModel(local);
+  else renderTabs();
+}
+
+async function handleRemoteDelete(id) {
+  if (!state.boards.find(b => b.id === id)) return;
+  state.boards = state.boards.filter(b => b.id !== id);
+  await db.deleteBoard(id);
+  if (state.activeId === id && state.boards.length) {
+    await activate(state.boards[0].id);
+  } else {
+    renderTabs();
+  }
+}
+
+function updateSyncStatus(s) {
+  const el = $("#syncStatus");
+  if (!el) return;
+  el.classList.remove("connected", "connecting", "error");
+  let label = "Lokal";
+  if (s === "connecting") { el.classList.add("connecting"); label = "Verbinde…"; }
+  else if (s === "connected") { el.classList.add("connected"); label = "Synced"; }
+  else if (s === "error") { el.classList.add("error"); label = "Fehler"; }
+  el.querySelector(".label").textContent = label;
+}
+
+/* ---------- Utils ---------- */
 function toast(msg) {
   const t = $("#toast");
   t.textContent = msg;
   t.classList.remove("hidden");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.add("hidden"), 1800);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-function blobToDataURL(blob) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = rej;
-    r.readAsDataURL(blob);
-  });
-}
-
-async function dataURLToBlob(url) {
-  const res = await fetch(url);
-  return res.blob();
+  toast._t = setTimeout(() => t.classList.add("hidden"), 2000);
 }
